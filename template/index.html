@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Contextual Question Answering System</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet"/>
+  <style>
+    .loading { display: none; }
+    .loading.active { display: block; }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <div class="container mx-auto px-4 py-8">
+    <h1 class="text-4xl font-bold text-center mb-8 text-gray-800">Contextual Question Answering System</h1>
+
+    <div class="max-w-3xl mx-auto bg-white rounded-lg shadow-lg p-6">
+      <div class="mb-4">
+        <label class="block text-gray-700 text-sm font-bold mb-2" for="lang">Language</label>
+        <select id="lang" class="w-full px-3 py-2 border rounded-lg">
+          <option value="en">English</option>
+          <option value="hi">Hindi</option>
+          <option value="kn">Kannada</option>
+        </select>
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-gray-700 text-sm font-bold mb-2" for="context">Context</label>
+        <textarea id="context" class="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none focus:shadow-outline" rows="6" placeholder="Enter your context here..."></textarea>
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-gray-700 text-sm font-bold mb-2" for="file">Upload file (optional)</label>
+        <input id="file" type="file" accept=".pdf,.txt,.docx" class="w-full"/>
+        <p class="text-xs text-gray-500 mt-1">Supported: .pdf, .txt, .docx — uploaded file text will be appended to Context.</p>
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-gray-700 text-sm font-bold mb-2" for="question">Question</label>
+        <input id="question" type="text" class="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none focus:shadow-outline" placeholder="Enter your question here..."/>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 mb-4">
+        <button id="askTextBtn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Get Answer (from text)</button>
+        <button id="askFileBtn" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Get Answer (upload file)</button>
+      </div>
+
+      <div class="loading mt-6 text-center" id="loading">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+        <p class="mt-2 text-gray-600">Processing your question...</p>
+      </div>
+
+      <div id="preview" class="mt-6 hidden">
+        <h3 class="text-lg font-semibold mb-2 text-gray-800">Extracted / Combined Context Preview</h3>
+        <div id="previewText" class="p-3 border rounded bg-gray-50 text-gray-700 whitespace-pre-wrap max-h-48 overflow-auto"></div>
+      </div>
+
+      <div id="answer" class="mt-6 hidden">
+        <h2 class="text-xl font-bold mb-2 text-gray-800">Answer:</h2>
+        <p id="answer-text" class="text-gray-700"></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://127.0.0.1:5000';
+    const contextEl = document.getElementById('context');
+    const questionEl = document.getElementById('question');
+    const fileEl = document.getElementById('file');
+    const loadingEl = document.getElementById('loading');
+    const answerEl = document.getElementById('answer');
+    const answerTextEl = document.getElementById('answer-text');
+    const previewEl = document.getElementById('preview');
+    const previewTextEl = document.getElementById('previewText');
+    const askTextBtn = document.getElementById('askTextBtn');
+    const askFileBtn = document.getElementById('askFileBtn');
+    const langEl = document.getElementById('lang');
+
+    function showLoading(on) {
+      if (on) loadingEl.classList.add('active'); else loadingEl.classList.remove('active');
+    }
+
+    function showAnswer(text) {
+      answerTextEl.textContent = text;
+      answerEl.classList.remove('hidden');
+    }
+
+    function showPreview(text) {
+      previewTextEl.textContent = text;
+      previewEl.classList.remove('hidden');
+    }
+
+    async function postFormToAskFile(form) {
+      let resp, text, json;
+      try {
+        resp = await fetch(`${API_BASE}/ask-file`, { method: 'POST', body: form });
+      } catch (err) {
+        throw new Error('Network error: ' + err.message);
+      }
+      try {
+        text = await resp.text();
+        json = text ? JSON.parse(text) : null;
+      } catch (err) {
+        const bodyPreview = (text || '').slice(0, 1000);
+        throw new Error('Invalid JSON from server (status ' + (resp && resp.status) + '). Response body (first 1000 chars):\n' + bodyPreview);
+      }
+      if (!resp.ok) {
+        const msg = (json && json.error) ? json.error : ('HTTP ' + resp.status);
+        throw new Error(msg);
+      }
+      return json;
+    }
+
+    askTextBtn.addEventListener('click', async () => {
+      const context = contextEl.value.trim();
+      const question = questionEl.value.trim();
+      const lang = langEl.value;
+      if (!context || !question) return alert('Please provide both context and question, or upload a file.');
+      showLoading(true);
+      answerEl.classList.add('hidden');
+      try {
+        const resp = await fetch(`${API_BASE}/ask`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ context, question, lang })
+        });
+        const json = await resp.json();
+        if (!resp.ok) throw new Error(json.error || 'Server error');
+        showAnswer(json.answer || 'No answer returned');
+      } catch (err) {
+        alert('Error: ' + err.message);
+      } finally {
+        showLoading(false);
+      }
+    });
+
+    askFileBtn.addEventListener('click', async () => {
+      const question = questionEl.value.trim();
+      const rawContext = contextEl.value.trim();
+      const lang = langEl.value;
+      if (!question) return alert('Please enter a question.');
+      const file = fileEl.files[0];
+      const form = new FormData();
+      form.append('question', question);
+      form.append('context', rawContext);
+      form.append('lang', lang);
+      if (file) form.append('file', file);
+      showLoading(true);
+      answerEl.classList.add('hidden');
+      previewEl.classList.add('hidden');
+      try {
+        const json = await postFormToAskFile(form);
+        showAnswer(json.answer || 'No answer returned');
+        if (json.extracted_text) showPreview(json.extracted_text);
+      } catch (err) {
+        alert('Error extracting file: ' + err.message);
+      } finally {
+        showLoading(false);
+      }
+    });
+
+    fileEl.addEventListener('change', async () => {
+      const file = fileEl.files[0];
+      const lang = langEl.value;
+      if (!file) return;
+      const supported = ['application/pdf', 'text/plain', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+      if (!supported.includes(file.type) && !file.name.match(/\.(pdf|txt|docx)$/i)) {
+        return alert('Unsupported file type. Allowed: pdf, txt, docx');
+      }
+      const form = new FormData();
+      form.append('file', file);
+      form.append('question', 'preview_only');
+      form.append('context', '');
+      form.append('lang', lang);
+      try {
+        const json = await postFormToAskFile(form);
+        if (json.status === 'success') {
+          if (json.extracted_text) {
+            contextEl.value = contextEl.value ? contextEl.value + '\n\n' + json.extracted_text : json.extracted_text;
+            showPreview(json.extracted_text);
+          } else {
+            showPreview('No text extracted from file.');
+          }
+        } else {
+          const err = json.error || 'Failed to extract file text';
+          alert(err);
+        }
+      } catch (err) {
+        alert('Error extracting file: ' + err.message);
+      }
+    });
+  </script>
+</body>
+</html>
